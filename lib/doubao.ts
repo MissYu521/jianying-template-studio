@@ -1,5 +1,6 @@
 import type {
   GlobalAnalysis,
+  ReferencePattern,
   ShotAnalysis,
   ShotFrameInput,
 } from "./types";
@@ -406,6 +407,13 @@ export async function analyzeGlobalEditing(
   shots: ShotAnalysis[]
 ): Promise<GlobalAnalysis> {
   if (isMock()) return mockGlobalAnalysis(meta.avgShotDuration);
+  return analyzeGlobalEditingReal(meta, shots);
+}
+
+async function analyzeGlobalEditingReal(
+  meta: { duration: number; shotCount: number; avgShotDuration: number },
+  shots: ShotAnalysis[]
+): Promise<GlobalAnalysis> {
 
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -418,6 +426,127 @@ export async function analyzeGlobalEditing(
         { maxTokens: 1500 }
       );
       return sanitizeGlobalAnalysis(extractJson(content));
+    } catch (err) {
+      lastError = err;
+      if (
+        err instanceof DoubaoError &&
+        ["NOT_CONFIGURED", "AUTH", "MODEL_NOT_FOUND", "RATE_LIMITED"].includes(err.code)
+      ) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
+// ============================================================
+// AI 参考式成片：参考样片剪辑范式分析
+// ============================================================
+
+const PATTERN_SYSTEM_PROMPT = `你是一名专业的剪辑范式分析师，擅长从参考样片的镜头统计数据与代表帧画面中提炼可复用的剪辑模式，并结合用户的剪辑需求给出编排建议。
+
+【硬性规则 —— 必须严格遵守】
+1. 只输出一个 JSON 对象。禁止输出任何解释、前缀、后缀、注释或 Markdown 代码块标记。
+2. JSON 的字段名、层级结构、字段类型必须与用户给出的 schema 完全一致，不得新增、删除或重命名字段。
+3. 枚举字段只能从指定候选值中原样选择一个，禁止输出候选值以外的内容。
+4. 所有描述性字符串使用简体中文，并遵守长度限制。`;
+
+function buildPatternPrompt(input: {
+  totalDuration: number;
+  shotDurations: number[];
+  userPrompt: string;
+}): string {
+  const avg =
+    input.shotDurations.length > 0
+      ? input.shotDurations.reduce((a, b) => a + b, 0) / input.shotDurations.length
+      : 0;
+  return `# 任务
+根据参考样片的镜头统计数据与代表帧画面，结合用户的剪辑需求，提炼可复用的剪辑范式。
+
+# 参考样片镜头统计
+- 总时长：${input.totalDuration}s
+- 镜头数：${input.shotDurations.length}
+- 平均镜头时长：${avg.toFixed(1)}s
+- 镜头时长序列：[${input.shotDurations.map((d) => d.toFixed(1)).join(", ")}]
+
+# 用户剪辑需求
+${input.userPrompt.trim() || "（用户未填写，按参考片特征推断）"}
+
+# 输出 JSON Schema（严格遵守）
+{
+  "paceType": "剪辑节奏。枚举值：快切、中等偏快、中等、中等偏慢、慢节奏。依据平均镜头时长判断：<2s→快切；2~4s→中等偏快或中等；4~8s→中等偏慢；>8s→慢节奏",
+  "avgShotDuration": "数字。平均镜头时长（秒），保留 1 位小数",
+  "durationPattern": "镜头时长模式。字符串，≤40字。示例：开头短镜头快切制造钩子，中段匀速展开",
+  "transition": "主转场类型。枚举值：硬切、叠化、闪黑、闪白、运镜转场、匹配剪辑",
+  "visualStyle": "整体画面风格。字符串，≤40字，结合代表帧的色调与质感",
+  "narrativeStructure": "叙事结构。字符串，≤60字。示例：钩子开场→信息密集展开→高潮收尾",
+  "bgmSuggestion": "BGM 建议。字符串，≤40字，结合节奏与用户需求。示例：快节奏卡点电子乐，鼓点对齐切换"
+}`;
+}
+
+function sanitizePattern(raw: Record<string, unknown>): ReferencePattern {
+  const avg = Number(raw.avgShotDuration);
+  return {
+    paceType: pickEnum(raw.paceType, PACE_TYPES, "中等"),
+    avgShotDuration: Number.isFinite(avg) && avg > 0 ? Math.round(avg * 10) / 10 : 2,
+    durationPattern: pickString(raw.durationPattern, 60, "匀速镜头组接"),
+    transition: pickEnum(raw.transition, TRANSITION_TYPES, "硬切"),
+    visualStyle: pickString(raw.visualStyle, 60, "未识别"),
+    narrativeStructure: pickString(raw.narrativeStructure, 80, "线性叙事"),
+    bgmSuggestion: pickString(raw.bgmSuggestion, 60, "根据画面节奏选择背景乐"),
+  };
+}
+
+function mockPattern(shotDurations: number[]): ReferencePattern {
+  const avg =
+    shotDurations.length > 0
+      ? shotDurations.reduce((a, b) => a + b, 0) / shotDurations.length
+      : 2;
+  return {
+    paceType: avg < 2 ? "快切" : avg <= 4 ? "中等偏快" : "中等",
+    avgShotDuration: Math.round(avg * 10) / 10,
+    durationPattern: "开头短镜头快切制造钩子，中段匀速展开（示例数据）",
+    transition: "硬切",
+    visualStyle: "冷色调蓝紫科技光效（示例数据）",
+    narrativeStructure: "钩子开场→信息密集展开→高潮收尾（示例数据）",
+    bgmSuggestion: "推测为快节奏卡点电子乐（示例数据）",
+  };
+}
+
+/**
+ * 分析参考样片的剪辑范式（镜头统计 + 代表帧画面 + 用户需求）。
+ * framesBase64 最多取前 3 张代表帧，控制请求体积与成本。
+ */
+export async function analyzeReferencePattern(input: {
+  totalDuration: number;
+  shotDurations: number[];
+  framesBase64: string[];
+  userPrompt: string;
+}): Promise<ReferencePattern> {
+  if (isMock()) return mockPattern(input.shotDurations);
+
+  const imageParts = input.framesBase64.slice(0, 3).map((b64) => ({
+    type: "image_url" as const,
+    image_url: { url: `data:image/jpeg;base64,${b64}` },
+  }));
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const content = await callDoubaoChat(
+        [
+          { role: "system", content: PATTERN_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: buildPatternPrompt(input) },
+              ...imageParts,
+            ],
+          },
+        ],
+        { maxTokens: 1000 }
+      );
+      return sanitizePattern(extractJson(content));
     } catch (err) {
       lastError = err;
       if (

@@ -24,7 +24,18 @@
 生成页 /generate/[jobId]
                     目标比例（9:16/16:9）+ 字幕样式预设（4 种）+ 转场（默认 AI 推荐）+ BGM 音量
                     「生成草稿」→ 打包 zip 并自动下载
+
+参考成片页 /reference
+                    分区1：批量上传视频/图片/音频素材（列表展示，拖拽排序）
+                    分区2：参考样片上传（仅限本地文件，附版权提示）
+                    分区3：剪辑提示词（时长/风格/BGM偏好/字幕要求/节奏快慢）
+                    分区4：成片比例（9:16/16:9）+ 参考强度（0.3~1.0）
+                    「开始分析参考片并编排素材」→
+                    进度面板：抽帧参考片 → 解析剪辑范式 → 匹配素材 → 生成 CapCut 草稿
+                    结果：剪辑范式 + 素材编排时间线 + 草稿 zip 下载
 ```
+
+**参考式成片编排规则**：每个视觉素材的成片时长 = `素材默认时长 + (参考镜头时长 - 默认时长) × 参考强度`（强度 1.0 完全贴近参考片节奏，0.3 保留素材原始节奏）；参考镜头时长序列循环套用；音频素材自动作为 BGM 轨道；提示词含"不要字幕"等字样时跳过字幕轨，否则按素材名生成占位字幕。草稿内为占位素材，导入剪映后按素材名替换即可。
 
 页面间通过 `jobId` 传递数据：解析结果与 AI 报告分别持久化为 `analysis.json` / `report.json`，子页面经 `GET /api/result/[jobId]` 读取，刷新不丢失。三个页面底部均有「导入剪映专业版」图文教程。
 
@@ -216,9 +227,11 @@ jianying-template-studio/
 │   │   ├── analyze/route.ts        # 视频解析接口（抽帧/镜头检测/音频提取）
 │   │   ├── analyze/report/route.ts # AI 剪辑手法分析接口（豆包 VL）
 │   │   ├── draft/route.ts          # 剪映草稿生成接口（zip 打包下载）
+│   │   ├── reference/compose/route.ts # AI 参考式成片接口（范式解析+素材编排）
 │   │   └── result/[jobId]/route.ts # 结果读取接口（跨页面数据传递）
 │   ├── report/[jobId]/page.tsx     # 报告页
 │   ├── generate/[jobId]/page.tsx   # 生成页
+│   ├── reference/page.tsx          # AI 参考式成片生成页
 │   ├── layout.tsx / page.tsx / globals.css
 ├── components/                     # UploadZone / ReportView / GenerateView / ImportGuide 等
 ├── lib/

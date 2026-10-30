@@ -129,3 +129,63 @@ export interface AiReportData {
 export type AiReportResponse =
   | { ok: true; data: AiReportData }
   | { ok: false; error: string };
+
+// ---------- AI 参考式成片生成（/api/reference/compose） ----------
+
+/** 参考样片剪辑范式（豆包 VL 分析输出） */
+export interface ReferencePattern {
+  /** 剪辑节奏：快切/中等偏快/中等/中等偏慢/慢节奏 */
+  paceType: string;
+  /** 平均镜头时长（秒） */
+  avgShotDuration: number;
+  /** 镜头时长模式描述 */
+  durationPattern: string;
+  /** 主转场类型 */
+  transition: string;
+  /** 整体画面风格 */
+  visualStyle: string;
+  /** 叙事结构 */
+  narrativeStructure: string;
+  /** BGM 建议 */
+  bgmSuggestion: string;
+}
+
+/** 素材编排结果项 */
+export interface ArrangementItem {
+  index: number;
+  /** 素材文件名 */
+  fileName: string;
+  /** 素材类型：video / image */
+  mediaType: string;
+  /** 成片时间线起点（秒） */
+  start: number;
+  end: number;
+  duration: number;
+  /** 与前一片段的转场 */
+  transition: string;
+}
+
+/** 成片生成响应数据 */
+export interface ComposeResultData {
+  jobId: string;
+  pattern: ReferencePattern;
+  /** 素材编排列表（视频轨，按时间顺序） */
+  arrangement: ArrangementItem[];
+  /** 成片总时长（秒） */
+  totalDuration: number;
+  /** 草稿产物 */
+  draft: {
+    draftName: string;
+    fileName: string;
+    downloadUrl: string;
+    shotCount: number;
+    subtitleCount: number;
+  };
+  /** 各阶段耗时 */
+  stages: Array<{ name: string; elapsedMs: number }>;
+  warnings: string[];
+}
+
+export type ComposeResponse =
+  | { ok: true; data: ComposeResultData }
+  | { ok: false; error: string };

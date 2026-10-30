@@ -25,7 +25,13 @@ export default function Header() {
 
         <nav className="hidden items-center gap-8 text-sm text-slate-400 md:flex">
           <a href="/#upload" className="transition-colors hover:text-white">
-            上传创作
+            视频解析
+          </a>
+          <a
+            href="/reference"
+            className="text-indigo-300 transition-colors hover:text-white"
+          >
+            参考成片
           </a>
           <a href="/#features" className="transition-colors hover:text-white">
             功能特性

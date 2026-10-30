@@ -65,6 +65,17 @@ export function probeVideo(filePath: string): Promise<VideoMeta> {
   });
 }
 
+/** 读取媒体文件时长（不限流类型，音频/视频通用） */
+export function probeMediaDuration(filePath: string): Promise<number> {
+  ensureFfmpegConfigured();
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err) return reject(err);
+      resolve(Number(data.format.duration ?? 0));
+    });
+  });
+}
+
 /** 按每秒 2 帧抽帧，输出 frame-0001.jpg ... 到指定目录，返回帧文件名列表 */
 export function extractFrames(
   filePath: string,
